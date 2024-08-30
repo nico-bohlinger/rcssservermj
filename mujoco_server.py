@@ -43,6 +43,7 @@ class Server:
         xml_path = (Path(__file__).resolve().parent / "data" / "ant.xml").as_posix()
         model = mujoco.MjModel.from_xml_path(xml_path)
         data = mujoco.MjData(model)
+        data.qpos[2] = 0.75
         nr_substeps = 1
         nr_intermediate_steps = 1
         dt = model.opt.timestep * nr_substeps * nr_intermediate_steps
