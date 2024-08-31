@@ -91,7 +91,7 @@ class Server:
         xml_path = (Path(__file__).resolve().parent / "data" / "robot.xml").as_posix()
         robot_spec = mujoco.MjSpec()
         robot_spec.from_file(xml_path)
-        robot_body = robot_spec.find_body("body")
+        robot_body = robot_spec.find_body("torso")
 
         xml_path = (Path(__file__).resolve().parent / "data" / "test.xml").as_posix()
         spec = mujoco.MjSpec()
@@ -110,24 +110,35 @@ class Server:
                     self.teams[team].append(player_id)
                     print(f"[TEAM {team}] Player {player_id} joined the game.")
                     frame = spec.worldbody.add_frame()
-                    frame.name = f"frame_{team}_{player_id}"
                     frame.attach_body(robot_body, "attached-", f"-{team}_{player_id}")
+                    new_robot_body = spec.find_body(f"attached-torso-{team}_{player_id}")
+                    new_robot_body.first_geom().rgba = [1, 0, 0, 1] if team == 0 else [0, 0, 1, 1]
                     len_old_qpos = len(data.qpos)
+                    len_old_qvel = len(data.qvel)
                     model, data = spec.recompile(model, data)
                     x_sign = 1 if team == 0 else -1
-                    data.qpos[0 + len_old_qpos: 3 + len_old_qpos] = self.positions[player_id] * np.array([x_sign, 1, 1])
+                    nq = len(data.qpos) - len_old_qpos
+                    nv = len(data.qvel) - len_old_qvel
+                    init_qpos = np.zeros(nq)
+                    init_qpos[:3] = self.positions[player_id] * np.array([x_sign, 1, 1])
+                    init_qpos[3:7] = [1, 0, 0, 0]
+                    init_qvel = np.zeros(nv)
+                    data.qpos[len_old_qpos:] = init_qpos
+                    data.qvel[len_old_qvel:] = init_qvel
                 self.add_player_list.clear()
             
             if self.remove_player_list:
                 for team, player_id in self.remove_player_list:
                     self.teams[team].remove(player_id)
                     print(f"[TEAM {team}] Player {player_id} left the game.")
-                    new_robot_body = spec.find_body(f"attached-body-{team}_{player_id}")
-                    spec.detach_body(new_robot_body)
+                    new_robot_body = spec.find_body(f"attached-torso-{team}_{player_id}")
+                    if new_robot_body:
+                        spec.detach_body(new_robot_body)
                     model, data = spec.recompile(model, data)
                 self.remove_player_list.clear()
 
             for _ in range(nr_intermediate_steps):
+                # data.ctrl = np.zeros(model.nu)
                 mujoco.mj_step(model, data, nr_substeps)
 
             if viewer:
