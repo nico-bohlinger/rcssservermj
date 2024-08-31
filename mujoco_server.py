@@ -1,4 +1,5 @@
 import sys
+import struct
 import socket
 import threading
 from pathlib import Path
@@ -48,13 +49,13 @@ class Server:
     def handle_client(self, conn, addr):
         print(f"[NEW CONNECTION] {addr} connected.")
         while True:
-            team_msg = conn.recv(32).decode("utf-8")
+            team_msg = conn.recv(1).decode("utf-8")
             if team_msg:
                 print(f"[{addr}] Received team: {team_msg}")
                 conn.send("ACK".encode("utf-8"))
                 break
         while True:
-            player_id_msg = conn.recv(32).decode("utf-8")
+            player_id_msg = conn.recv(2).decode("utf-8")
             if player_id_msg:
                 print(f"[{addr}] Received player ID: {player_id_msg}")
                 conn.send("ACK".encode("utf-8"))
@@ -72,19 +73,19 @@ class Server:
         
         self.add_player_list.append((team, player_id))
 
-        connected = True
-        while connected and self.server_running:
-            try:
-                msg = conn.recv(32).decode("utf-8")
-                if msg:
-                    print(f"[{addr}] {msg}")
-                else:
-                    connected = False
-            except ConnectionResetError:
-                connected = False
-        self.remove_player_list.append((team, player_id))
-        conn.close()
-        self.connections.remove(conn)
+        # connected = True
+        # while connected and self.server_running:
+        #     try:
+        #         msg = conn.recv(32).decode("utf-8")
+        #         if msg:
+        #             print(f"[{addr}] {msg}")
+        #         else:
+        #             connected = False
+        #     except ConnectionResetError:
+        #         connected = False
+        # self.remove_player_list.append((team, player_id))
+        # conn.close()
+        # self.connections.remove(conn)
     
 
     def run_simulation(self):
@@ -96,13 +97,12 @@ class Server:
         xml_path = (Path(__file__).resolve().parent / "data" / "test.xml").as_posix()
         spec = mujoco.MjSpec()
         spec.from_file(xml_path)
-        model = spec.compile()
-        data = mujoco.MjData(model)
-        nr_substeps = 1
-        nr_intermediate_steps = 1
-        dt = model.opt.timestep * nr_substeps * nr_intermediate_steps
+        mj_model = spec.compile()
+        mj_data = mujoco.MjData(mj_model)
+        nr_substeps = 5
+        dt = mj_model.opt.timestep * nr_substeps
 
-        viewer = None if not self.render else MujocoViewer(model, dt)
+        viewer = None if not self.render else MujocoViewer(mj_model, dt)
 
         while self.server_running:
             if self.add_player_list:
@@ -113,18 +113,18 @@ class Server:
                     frame.attach_body(robot_body, "attached-", f"-{team}_{player_id}")
                     new_robot_body = spec.find_body(f"attached-torso-{team}_{player_id}")
                     new_robot_body.first_geom().rgba = [1, 0, 0, 1] if team == 0 else [0, 0, 1, 1]
-                    len_old_qpos = len(data.qpos)
-                    len_old_qvel = len(data.qvel)
-                    model, data = spec.recompile(model, data)
+                    len_old_qpos = len(mj_data.qpos)
+                    len_old_qvel = len(mj_data.qvel)
+                    mj_model, mj_data = spec.recompile(mj_model, mj_data)
                     x_sign = 1 if team == 0 else -1
-                    nq = len(data.qpos) - len_old_qpos
-                    nv = len(data.qvel) - len_old_qvel
+                    nq = len(mj_data.qpos) - len_old_qpos
+                    nv = len(mj_data.qvel) - len_old_qvel
                     init_qpos = np.zeros(nq)
                     init_qpos[:3] = self.positions[player_id] * np.array([x_sign, 1, 1])
                     init_qpos[3:7] = [1, 0, 0, 0]
                     init_qvel = np.zeros(nv)
-                    data.qpos[len_old_qpos:] = init_qpos
-                    data.qvel[len_old_qvel:] = init_qvel
+                    mj_data.qpos[len_old_qpos:] = init_qpos
+                    mj_data.qvel[len_old_qvel:] = init_qvel
                 self.add_player_list.clear()
             
             if self.remove_player_list:
@@ -134,16 +134,42 @@ class Server:
                     new_robot_body = spec.find_body(f"attached-torso-{team}_{player_id}")
                     if new_robot_body:
                         spec.detach_body(new_robot_body)
-                    model, data = spec.recompile(model, data)
+                    mj_model, mj_data = spec.recompile(mj_model, mj_data)
                 self.remove_player_list.clear()
 
-            for _ in range(nr_intermediate_steps):
-                # data.ctrl = np.zeros(model.nu)
-                mujoco.mj_step(model, data, nr_substeps)
+            for i, conn in enumerate(self.connections):
+                qpos = mj_data.qpos[i*nq:(i+1)*nq]
+                qvel = mj_data.qvel[i*nv:(i+1)*nv]
+                qpos_qvel = np.concatenate([qpos, qvel])
+                array_to_send = qpos_qvel.tobytes()
+                shape = qpos_qvel.shape
+                dtype = qpos_qvel.dtype.name
+                conn.sendall(struct.pack('>I', len(shape)) + struct.pack('>' + 'I'*len(shape), *shape))
+                conn.sendall(dtype.ljust(10).encode('utf-8'))
+                conn.sendall(array_to_send)
+            
+            mj_ctrl = np.zeros(mj_model.nu)
+            for i, conn in enumerate(self.connections):
+                try:
+                    shape_len = struct.unpack('>I', conn.recv(4))[0]
+                    shape = struct.unpack('>' + 'I'*shape_len, conn.recv(4 * shape_len))
+                    dtype = conn.recv(10).decode('utf-8').strip()
+                    data = conn.recv(np.prod(shape) * np.dtype(dtype).itemsize)
+                    action = np.frombuffer(data, dtype=dtype).reshape(shape)
+                    mj_ctrl[i*nv:(i+1)*nv] = action
+                except Exception as e:
+                    print(f"[ERROR] Connection closed due to: {e}")
+                    self.remove_player_list.append((i, i+1))
+                    conn.shutdown(socket.SHUT_RDWR)
+                    conn.close()
+                    self.connections.remove(conn)
+
+            mj_data.ctrl = mj_ctrl
+            mujoco.mj_step(mj_model, mj_data, nr_substeps)
 
             if viewer:
-                viewer.model = model
-                viewer.render(data)
+                viewer.model = mj_model
+                viewer.render(mj_data)
         
         if viewer:
             viewer.close()

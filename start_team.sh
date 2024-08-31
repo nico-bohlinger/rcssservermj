@@ -10,4 +10,5 @@ ARG1=$1
 for ((i=1; i<=11; i++))
 do
     python mujoco_client.py localhost 60000 $ARG1 $i &
+    sleep 0.3
 done
