@@ -1,0 +1,8 @@
+<mujoco>
+  <worldbody>
+    <body name="body">
+      <freejoint/>
+      <geom size=".1"/>
+    </body>
+  </worldbody>
+</mujoco>

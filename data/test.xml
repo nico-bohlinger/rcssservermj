@@ -1,8 +1,5 @@
 <mujoco>
   <asset>
-    <!-- <texture builtin="checker" height="100" name="texplane" rgb1=".2 .3 .4" rgb2=".1 0.15 0.2" type="2d" width="100"/>
-    <material name="MatPlane" reflectance="0.0" texture="texplane" texrepeat="1 1" texuniform="true"/> -->
-    <!-- load image for floor -->
     <texture name="pitch" file="pitch_nologo_l.png" type="2d"/>
     <material name="pitch" reflectance="0.0" texture="pitch" texrepeat="1 1" texuniform="false"/>
   </asset>
