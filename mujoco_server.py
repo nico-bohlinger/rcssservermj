@@ -102,7 +102,7 @@ class Server:
         self.nv = 14
         self.nu = 8
 
-        xml_path = (Path(__file__).resolve().parent / "data" / "test.xml").as_posix()
+        xml_path = (Path(__file__).resolve().parent / "data" / "pitch.xml").as_posix()
         spec = mujoco.MjSpec()
         spec.from_file(xml_path)
         mj_model = spec.compile()
