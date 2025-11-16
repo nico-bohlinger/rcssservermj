@@ -1,5 +1,7 @@
 # RCSSServerMJ
 
+> ⚠️ **Warning**: This repository contains the initial MVP for the MuJoCo rewrite of the RoboCup Simulation 3D League. This project is further developed under: [RCSSServerMJ](https://gitlab.com/robocup-sim/rcssservermj)
+
 Client-Server code for dynamic loading of MuJoCo robots.
 
 <img src="screenshot.png"/>
